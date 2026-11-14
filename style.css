@@ -194,6 +194,10 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 #addBlock { margin-top: 12px; }
 #blocksTotal { margin-top: 10px; }
 
+/* снег: лежит позади интерфейса, видно его в пустых местах */
+.snow { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+#snowBtn[aria-pressed="false"] { color: var(--faint); }
+
 /* login */
 .auth { min-height: 100%; display: grid; place-items: center; padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
 .auth-card { width: min(380px, 100%); display: flex; flex-direction: column; gap: 12px; }

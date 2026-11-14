@@ -446,6 +446,62 @@ function toggleTheme() {
   syncThemeColor();
 }
 
+/* ---------- новогодний снег ----------
+   Идёт с ноября по январь, немного и медленно. Кнопка-снежинка выключает его (запоминается).
+   Если в системе включено «уменьшить движение», снега нет. */
+const SNOW_KEY = 'calendar-snow';
+const snowSeason = () => [10, 11, 0].includes(now().m);
+let snowOn = true, snowRaf = 0, flakes = [];
+try { snowOn = localStorage.getItem(SNOW_KEY) !== 'off'; } catch (e) { /* по умолчанию включён */ }
+
+function startSnow() {
+  const cv = $('#snow'), ctx = cv.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const resize = () => { cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); };
+  resize();
+  window.addEventListener('resize', resize);
+  const count = innerWidth < 700 ? 18 : 36;
+  const make = top => ({
+    x: Math.random() * innerWidth, y: top ? -10 : Math.random() * innerHeight,
+    r: 1 + Math.random() * 2.2, v: 0.25 + Math.random() * 0.55,
+    a: 0.35 + Math.random() * 0.45, s: Math.random() * Math.PI * 2, w: 0.004 + Math.random() * 0.01,
+  });
+  flakes = Array.from({ length: count }, () => make(false));
+  const frame = () => {
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    const color = currentTheme() === 'dark' ? '255,255,255' : '140,170,210';
+    for (const f of flakes) {
+      f.y += f.v; f.s += f.w; f.x += Math.sin(f.s) * 0.3;
+      if (f.y > innerHeight + 10) Object.assign(f, make(true));
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(${color},${f.a})`;
+      ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    snowRaf = requestAnimationFrame(frame);
+  };
+  snowRaf = requestAnimationFrame(frame);
+}
+function stopSnow() {
+  cancelAnimationFrame(snowRaf);
+  snowRaf = 0;
+  const cv = $('#snow');
+  cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+}
+function setupSnow() {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const btn = $('#snowBtn');
+  btn.hidden = !snowSeason() || reduce;
+  btn.setAttribute('aria-pressed', snowOn);
+  if (snowSeason() && !reduce && snowOn && !snowRaf) startSnow();
+}
+function toggleSnow() {
+  snowOn = !snowOn;
+  try { localStorage.setItem(SNOW_KEY, snowOn ? 'on' : 'off'); } catch (e) { /* не запомним */ }
+  $('#snowBtn').setAttribute('aria-pressed', snowOn);
+  if (snowOn) startSnow(); else stopSnow();
+}
+
 /* ---------- backup ---------- */
 function exportData() {
   const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
@@ -630,6 +686,7 @@ $('#prev').onclick = () => goMonth(-1);
 $('#next').onclick = () => goMonth(1);
 $('#todayBtn').onclick = () => selectDay(now().key);
 $('#themeBtn').onclick = toggleTheme;
+$('#snowBtn').onclick = toggleSnow;
 $('#eveningBtn').onclick = openEvening;
 $('#summaryBtn').onclick = () => { const n = now(); openBlocks(mkey(n.y, n.m), true); };
 $('#editBlocks').onclick = () => { const p = parse(sel); openBlocks(mkey(p.y, p.m), false); };
@@ -738,6 +795,7 @@ if ('serviceWorker' in navigator) {
 }
 setMode('none');
 setAuthMode('in');
+setupSnow();
 if (document.documentElement.dataset.theme) syncThemeColor();
 sb.auth.onAuthStateChange((event) => {
   if (event === 'SIGNED_OUT' && user) showAuth();

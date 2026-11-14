@@ -1,6 +1,6 @@
 // Простой service worker: файлы сайта берём из сети, а без интернета показываем сохранённую копию.
 // Запросы к Supabase не трогаем: данные всегда идут напрямую.
-const CACHE = 'calendar-shell-v2';
+const CACHE = 'calendar-shell-v3';
 const SHELL = [
   './', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
