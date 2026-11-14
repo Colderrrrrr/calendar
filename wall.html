@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Календарь на рабочий стол</title>
+<!-- Живые обои для Lively Wallpaper: текущий месяц с задачами, список на сегодня и снег.
+     Только показывает данные, ничего не меняет. Вход общий с основным сайтом. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@200;300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0d0d0f; --panel: rgba(23,23,26,.72); --line: rgba(60,60,66,.75);
+  --text: #ececec; --muted: #9c9c98; --faint: #5d5d5a; --accent: #4c8ff0;
+  --plan: #4c93e8; --done: #78b33a; --fail: #ee5a5a;
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: Onest, 'Segoe UI', system-ui, sans-serif; color: var(--text);
+  background:
+    radial-gradient(60vw 50vh at 8% 100%, rgba(76,143,240,.16), transparent 70%),
+    radial-gradient(40vw 45vh at 92% 40%, rgba(76,143,240,.08), transparent 70%),
+    linear-gradient(#0d0d0f 30%, #0e1320);
+  cursor: default; user-select: none;
+}
+canvas { position: fixed; inset: 0; pointer-events: none; }
+#snowFar { filter: blur(3px); }
+
+/* левая часть: год / день */
+.hero { position: fixed; left: 150px; bottom: 170px; }
+.hero .big { font-weight: 200; font-size: 250px; line-height: .8; letter-spacing: -6px; margin-left: -12px; }
+.hero .sub { margin-top: 34px; font-size: 30px; font-weight: 300; color: var(--muted); display: flex; align-items: center; gap: 22px; }
+.hero .dots { display: flex; gap: 12px; }
+.hero .dots i { width: 13px; height: 13px; border-radius: 50%; }
+.hero .meta { margin-top: 14px; font-size: 20px; color: var(--faint); }
+
+/* правая часть: месяц + сегодня */
+.side { position: fixed; right: 170px; top: 50%; transform: translateY(-52%); width: 590px; }
+.side h2 { font-weight: 300; font-size: 38px; margin-bottom: 26px; }
+.wd, .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.wd span { font-size: 15px; color: var(--muted); padding-left: 12px; margin-bottom: 8px; }
+.cell { height: 72px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); padding: 9px 11px; display: flex; flex-direction: column; justify-content: space-between; }
+.cell b { font-weight: 400; font-size: 18px; }
+.cell.out { opacity: .38; }
+.cell.today { border: 2px solid var(--accent); background: rgba(76,143,240,.22); }
+.cell.today b { color: #fff; font-weight: 500; }
+.cell .d { display: flex; gap: 5px; align-items: center; height: 10px; }
+.cell .d i { width: 9px; height: 9px; border-radius: 50%; }
+.cell .d em { font-style: normal; font-size: 12px; color: var(--muted); }
+.plan { background: var(--plan); } .done { background: var(--done); } .fail { background: var(--fail); }
+
+.today-box { margin-top: 34px; }
+.today-box h3 { font-weight: 400; font-size: 20px; color: var(--muted); margin-bottom: 14px; }
+.today-box ul { list-style: none; padding: 0; display: grid; gap: 10px; }
+.today-box li { display: flex; align-items: center; gap: 14px; font-size: 20px; }
+.today-box li i { flex: none; width: 11px; height: 11px; border-radius: 50%; }
+.today-box li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.today-box li time { margin-left: auto; padding-left: 16px; color: var(--muted); font-size: 17px; font-variant-numeric: tabular-nums; }
+.today-box li.is-done span { color: var(--muted); }
+.today-box .empty { font-size: 19px; color: var(--faint); }
+
+/* вход (нужен один раз) */
+.login { position: fixed; inset: 0; display: grid; place-items: center; }
+.login form { width: 360px; display: grid; gap: 12px; padding: 28px; border-radius: 16px; background: #17171a; border: 1px solid #29292d; }
+.login h1 { font-weight: 500; font-size: 22px; }
+.login p { color: var(--muted); font-size: 14px; line-height: 1.4; }
+.login input { font: inherit; font-size: 16px; padding: 11px 12px; border-radius: 10px; border: 1px solid #3a3a3f; background: #0d0d0f; color: var(--text); }
+.login button { font: inherit; font-size: 16px; padding: 11px; border-radius: 10px; border: 0; background: var(--accent); color: #08101f; font-weight: 500; cursor: pointer; }
+.login .err { color: #f7c4c4; }
+[hidden] { display: none !important; }
+
+/* один узкий монитор или маленький экран — всё поменьше */
+@media (max-width: 1500px) {
+  .hero { left: 90px; bottom: 130px; } .hero .big { font-size: 170px; }
+  .side { right: 90px; width: 500px; } .cell { height: 62px; }
+}
+</style>
+</head>
+<body>
+<canvas id="snowFar"></canvas>
+
+<section class="hero" id="hero" hidden>
+  <div class="big" id="big"></div>
+  <div class="sub"><span id="sub"></span><span class="dots"><i class="done"></i><i class="fail"></i><i class="plan"></i></span></div>
+  <div class="meta" id="meta"></div>
+</section>
+
+<section class="side" id="side" hidden>
+  <h2 id="month"></h2>
+  <div class="wd"><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div>
+  <div class="grid" id="grid"></div>
+  <div class="today-box">
+    <h3 id="todayTitle"></h3>
+    <ul id="todayList"></ul>
+  </div>
+</section>
+
+<section class="login" id="login" hidden>
+  <form id="loginForm">
+    <h1>Мой календарь</h1>
+    <p>Войди один раз, и обои будут показывать твои задачи.</p>
+    <input id="email" type="email" placeholder="Почта" autocomplete="email">
+    <input id="pass" type="password" placeholder="Пароль" autocomplete="current-password">
+    <p class="err" id="err" hidden></p>
+    <button type="submit">Войти</button>
+  </form>
+</section>
+
+<canvas id="snowNear"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js?v=5"></script>
+<script>
+const $ = s => document.querySelector(s);
+const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const MONTHS_GEN = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+const WEEKDAYS = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
+const pad = n => String(n).padStart(2, '0');
+const dkey = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// время Костаная (UTC+5), как на сайте
+function now() {
+  const t = new Date(Date.now() + 5 * 3600000);
+  return { y: t.getUTCFullYear(), m: t.getUTCMonth(), d: t.getUTCDate(), wd: t.getUTCDay(), key: dkey(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()) };
+}
+
+const cfg = window.CALENDAR_CONFIG;
+const sb = supabase.createClient(cfg.url, cfg.key, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: 'calendar-auth' },
+});
+
+let tasks = {};   // { 'YYYY-MM-DD': [{name,start,end,status}] }
+let weather = '';
+
+async function loadTasks() {
+  const n = now();
+  // берём с запасом: прошлый, текущий и следующий месяц (хватает для хвостов сетки)
+  const from = dkey(n.m === 0 ? n.y - 1 : n.y, (n.m + 11) % 12, 1);
+  const to = dkey(n.m === 11 ? n.y + 1 : n.y, (n.m + 1) % 12, 28);
+  const { data, error } = await sb.from('tasks').select('day,name,start_time,end_time,status,created_at')
+    .gte('day', from).lte('day', to + '').order('created_at').limit(5000);
+  if (error) throw error;
+  const t = {};
+  for (const r of data) (t[r.day] = t[r.day] || []).push({ name: r.name, start: r.start_time, end: r.end_time, status: r.status });
+  tasks = t;
+}
+
+async function loadWeather() {
+  try {
+    const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=56.84&longitude=60.61&current=temperature_2m,weather_code,snowfall&timezone=Asia%2FYekaterinburg');
+    const { current: c } = await r.json();
+    const t = Math.round(c.temperature_2m);
+    const snowing = [71, 73, 75, 77, 85, 86].includes(c.weather_code) || c.snowfall > 0;
+    weather = `Екатеринбург ${t > 0 ? '+' : t < 0 ? '−' : ''}${Math.abs(t)}°${snowing ? ', идёт снег' : ''}`;
+  } catch (e) { /* без погоды */ }
+}
+
+function render() {
+  const n = now();
+
+  // слева: ноябрь–декабрь — следующий год и сколько до него, январь — «С Новым годом», иначе — сегодняшнее число
+  if (n.m >= 10) {
+    const left = Math.round((Date.UTC(n.y + 1, 0, 1) - Date.UTC(n.y, n.m, n.d)) / 86400000);
+    $('#big').textContent = n.y + 1;
+    $('#sub').textContent = left === 1 ? 'Новый год уже завтра' : `До Нового года ${left} ${plural(left, 'день', 'дня', 'дней')}`;
+  } else if (n.m === 0) {
+    $('#big').textContent = n.y;
+    $('#sub').textContent = 'С Новым годом';
+  } else {
+    $('#big').textContent = n.d;
+    $('#sub').textContent = `${MONTHS_GEN[n.m]}, ${WEEKDAYS[n.wd]}`;
+  }
+  $('#meta').textContent = weather;
+
+  // справа: сетка месяца с понедельника, с хвостами соседних месяцев
+  $('#month').textContent = `${MONTHS[n.m]} ${n.y}`;
+  const first = (new Date(Date.UTC(n.y, n.m, 1)).getUTCDay() + 6) % 7;
+  const days = new Date(Date.UTC(n.y, n.m + 1, 0)).getUTCDate();
+  const rows = Math.ceil((first + days) / 7);
+  let html = '';
+  for (let i = 0; i < rows * 7; i++) {
+    const t = new Date(Date.UTC(n.y, n.m, i - first + 1));
+    const k = dkey(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate());
+    const list = tasks[k] || [];
+    const dots = list.slice(0, 4).map(x => `<i class="${x.status}"></i>`).join('') + (list.length > 4 ? `<em>+${list.length - 4}</em>` : '');
+    const cls = ['cell', t.getUTCMonth() !== n.m && 'out', k === n.key && 'today'].filter(Boolean).join(' ');
+    html += `<div class="${cls}"><b>${t.getUTCDate()}</b><span class="d">${dots}</span></div>`;
+  }
+  $('#grid').innerHTML = html;
+
+  // сегодня: сначала задачи со временем по порядку, потом без времени
+  $('#todayTitle').textContent = `Сегодня, ${n.d} ${MONTHS_GEN[n.m]}`;
+  const today = [...(tasks[n.key] || [])].sort((a, b) => (a.start || '99') < (b.start || '99') ? -1 : 1);
+  const max = 7;
+  $('#todayList').innerHTML = today.length
+    ? today.slice(0, max).map(x => `<li class="is-${x.status}"><i class="${x.status}"></i><span>${esc(x.name)}</span>${x.start ? `<time>${x.start}–${x.end}</time>` : ''}</li>`).join('')
+      + (today.length > max ? `<li class="empty">и ещё ${today.length - max}</li>` : '')
+    : '<li class="empty">Задач нет — можно отдыхать</li>';
+}
+const plural = (n, a, b, c) => { const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? b : c; };
+
+async function refresh() {
+  try { await loadTasks(); } catch (e) { console.error(e); /* нет связи — оставляем старое */ }
+  render();
+}
+
+async function start() {
+  $('#login').hidden = true;
+  $('#hero').hidden = false;
+  $('#side').hidden = false;
+  await loadWeather();
+  await refresh();
+  setInterval(refresh, 60 * 1000);          // задачи — раз в минуту
+  setInterval(loadWeather, 15 * 60 * 1000);  // погода — раз в 15 минут
+  // когда обои снова видны (вышел из игры, разблокировал ПК) — сразу обновить
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+}
+
+$('#loginForm').onsubmit = async e => {
+  e.preventDefault();
+  $('#err').hidden = true;
+  const { data, error } = await sb.auth.signInWithPassword({ email: $('#email').value.trim(), password: $('#pass').value });
+  if (error) { $('#err').textContent = 'Неверная почта или пароль'; $('#err').hidden = false; return; }
+  if (data.session) start();
+};
+
+sb.auth.getSession().then(({ data }) => { if (data.session) start(); else $('#login').hidden = false; });
+
+/* снег: два слоя — дальний размытый и ближний чёткий, немного и медленно */
+(function snow() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const layers = [
+    { cv: $('#snowFar'), count: 22, r: [3, 6], v: [0.15, 0.35], a: [0.08, 0.18] },
+    { cv: $('#snowNear'), count: 70, r: [0.9, 2.3], v: [0.3, 0.8], a: [0.35, 0.8] },
+  ];
+  const rnd = ([a, b]) => a + Math.random() * (b - a);
+  let W, H;
+  const resize = () => {
+    W = innerWidth; H = innerHeight;
+    for (const L of layers) { L.cv.width = W; L.cv.height = H; }
+  };
+  resize();
+  addEventListener('resize', resize);
+  const make = (L, top) => ({ x: Math.random() * W, y: top ? -10 : Math.random() * H, r: rnd(L.r), v: rnd(L.v), a: rnd(L.a), s: Math.random() * 6.28, w: 0.004 + Math.random() * 0.01 });
+  for (const L of layers) { L.ctx = L.cv.getContext('2d'); L.f = Array.from({ length: Math.round(L.count * W / 1920) }, () => make(L, false)); }
+  const frame = () => {
+    for (const L of layers) {
+      L.ctx.clearRect(0, 0, W, H);
+      for (const f of L.f) {
+        f.y += f.v; f.s += f.w; f.x += Math.sin(f.s) * 0.3;
+        if (f.y > H + 10) Object.assign(f, make(L, true));
+        L.ctx.beginPath();
+        L.ctx.fillStyle = `rgba(235,242,255,${f.a})`;
+        L.ctx.arc(f.x, f.y, f.r, 0, 6.2832);
+        L.ctx.fill();
+      }
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
