@@ -39,9 +39,14 @@ const isLastDay = n => n.d === daysIn(n.y, n.m);
 
 /* ---------- Supabase ---------- */
 const cfg = window.CALENDAR_CONFIG;
+// Пришли по ссылке из письма «сбросить пароль»? Смотрим адрес до того, как Supabase его разберёт.
+const hashParams = new URLSearchParams(location.hash.slice(1));
+const cameForRecovery = hashParams.get('type') === 'recovery';
+const recoveryLinkError = hashParams.get('error_code') || hashParams.get('error');
+
 // Вход запоминается на устройстве: сессия лежит в браузере и сама продлевается, пока не нажмёшь «Выйти».
 const sb = supabase.createClient(cfg.url, cfg.key, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: 'calendar-auth' },
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'implicit', storageKey: 'calendar-auth' },
 });
 let user = null;
 
@@ -498,11 +503,25 @@ async function migrate(old) {
 }
 
 /* ---------- вход ---------- */
+/* режимы экрана: in — вход, up — регистрация, reset — прислать ссылку, newpass — задать новый пароль */
 let authMode = 'in';
+const AUTH_TEXT = {
+  in:      { lead: 'Войди, чтобы видеть свои задачи на любом устройстве.', submit: 'Войти', sw: 'Нет аккаунта? Создать', pass: 'Пароль' },
+  up:      { lead: 'Создай аккаунт: почта и пароль не короче 6 символов.', submit: 'Создать аккаунт', sw: 'Уже есть аккаунт? Войти', pass: 'Пароль' },
+  reset:   { lead: 'Введи почту, с которой регистрировался. Пришлём ссылку, чтобы задать новый пароль.', submit: 'Прислать ссылку', sw: 'Вспомнил пароль? Войти', pass: 'Пароль' },
+  newpass: { lead: 'Придумай новый пароль для своего аккаунта.', submit: 'Сохранить пароль', sw: '', pass: 'Новый пароль' },
+};
 function setAuthMode(m) {
   authMode = m;
-  $('#authSubmit').textContent = m === 'in' ? 'Войти' : 'Создать аккаунт';
-  $('#authSwitch').textContent = m === 'in' ? 'Нет аккаунта? Создать' : 'Уже есть аккаунт? Войти';
+  const t = AUTH_TEXT[m];
+  $('#authLead').textContent = t.lead;
+  $('#authSubmit').textContent = t.submit;
+  $('#authSwitch').textContent = t.sw;
+  $('#authSwitch').hidden = !t.sw;
+  $('#authForgot').hidden = m !== 'in';
+  $('#emailField').hidden = m === 'newpass';
+  $('#passwordField').hidden = m === 'reset';
+  $('#passwordLabel').textContent = t.pass;
   $('#authPassword').autocomplete = m === 'in' ? 'current-password' : 'new-password';
   authMessage('');
 }
@@ -522,26 +541,46 @@ function authErrorText(e) {
     email_not_confirmed: 'Почта не подтверждена. Открой письмо от Supabase и нажми ссылку.',
     over_email_send_rate_limit: 'Слишком много писем за час. Попробуй позже.',
     over_request_rate_limit: 'Слишком много попыток. Подожди минуту.',
+    same_password: 'Новый пароль совпадает со старым. Придумай другой.',
+    email_address_not_authorized: 'Письмо не отправилось: в Supabase не настроена почта для писем. Напиши владельцу календаря.',
   };
   return map[e.code] || (/fetch|network/i.test(e.message) ? 'Нет связи с сервером. Проверь интернет.' : e.message);
 }
 async function submitAuth(e) {
   e.preventDefault();
   const email = $('#authEmail').value.trim(), password = $('#authPassword').value;
-  if (!/^\S+@\S+\.\S+$/.test(email)) return authMessage('Введи почту, например name@mail.com');
-  if (password.length < 6) return authMessage('Пароль должен быть не короче 6 символов');
-  const btn = $('#authSubmit');
+  if (authMode !== 'newpass' && !/^\S+@\S+\.\S+$/.test(email)) return authMessage('Введи почту, например name@mail.com');
+  if (authMode !== 'reset' && password.length < 6) return authMessage('Пароль должен быть не короче 6 символов');
+  const btn = $('#authSubmit'), mode = authMode;
   btn.disabled = true;
   btn.textContent = 'Подожди…';
-  const { data, error } = authMode === 'in'
-    ? await sb.auth.signInWithPassword({ email, password })
-    : await sb.auth.signUp({ email, password });
+  let res;
+  if (mode === 'in') res = await sb.auth.signInWithPassword({ email, password });
+  else if (mode === 'up') res = await sb.auth.signUp({ email, password });
+  else if (mode === 'reset') res = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  else res = await sb.auth.updateUser({ password });
   btn.disabled = false;
-  setAuthMode(authMode);
+  btn.textContent = AUTH_TEXT[mode].submit;
+  const { data, error } = res;
   if (error) return authMessage(authErrorText(error));
-  if (!data.session) return authMessage('Аккаунт создан. Подтверди почту по ссылке из письма и войди.', true);
+  if (mode === 'reset') return authMessage('Если с этой почтой есть аккаунт, письмо со ссылкой уже в пути. Проверь и папку «Спам».', true);
   $('#authPassword').value = '';
+  if (mode === 'newpass') {
+    const { data: s } = await sb.auth.getSession();
+    toast('Пароль изменён');
+    return startApp(s.session.user);
+  }
+  if (!data.session) return authMessage('Аккаунт создан. Подтверди почту по ссылке из письма и войди.', true);
   startApp(data.session.user);
+}
+
+function showNewPassword() {
+  user = null;
+  $('#loading').hidden = true;
+  $('#app').hidden = true;
+  $('#authScreen').hidden = false;
+  setAuthMode('newpass');
+  $('#authPassword').focus();
 }
 
 function showAuth() {
@@ -552,6 +591,7 @@ function showAuth() {
   $('#loading').hidden = true;
   $('#app').hidden = true;
   $('#authScreen').hidden = false;
+  if (authMode === 'newpass') setAuthMode('in');
   $('#authEmail').focus();
 }
 
@@ -582,6 +622,7 @@ async function startApp(u) {
 /* ---------- events ---------- */
 $('#authForm').onsubmit = submitAuth;
 $('#authSwitch').onclick = () => setAuthMode(authMode === 'in' ? 'up' : 'in');
+$('#authForgot').onclick = () => setAuthMode('reset');
 $('#authEmail').oninput = $('#authPassword').oninput = () => authMessage('');
 $('#logoutBtn').onclick = async () => { flushBlockEdits(); await sb.auth.signOut(); showAuth(); };
 
@@ -698,8 +739,17 @@ if ('serviceWorker' in navigator) {
 setMode('none');
 setAuthMode('in');
 if (document.documentElement.dataset.theme) syncThemeColor();
-sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT' && user) showAuth(); });
+sb.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_OUT' && user) showAuth();
+  if (event === 'PASSWORD_RECOVERY') showNewPassword();
+});
 sb.auth.getSession().then(({ data }) => {
-  if (data.session) startApp(data.session.user);
-  else showAuth();
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  if (cameForRecovery && data.session) return showNewPassword();
+  if (data.session) return startApp(data.session.user);
+  showAuth();
+  if (recoveryLinkError) {
+    setAuthMode('reset');
+    authMessage('Ссылка из письма устарела или уже использована. Запроси новую.');
+  }
 });
