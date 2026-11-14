@@ -502,6 +502,26 @@ function toggleSnow() {
   if (snowOn) startSnow(); else stopSnow();
 }
 
+/* ---------- погода в Екатеринбурге (Open-Meteo, бесплатно, без ключа) ---------- */
+const WEATHER_URL = 'https://api.open-meteo.com/v1/forecast?latitude=56.84&longitude=60.61&current=temperature_2m,weather_code,snowfall&timezone=Asia%2FYekaterinburg';
+const SNOW_CODES = [71, 73, 75, 77, 85, 86];
+const SNOWFLAKE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/></svg>';
+async function loadWeather() {
+  try {
+    const res = await fetch(WEATHER_URL);
+    if (!res.ok) throw new Error(res.status);
+    const { current: c } = await res.json();
+    const t = Math.round(c.temperature_2m);
+    const snowing = SNOW_CODES.includes(c.weather_code) || c.snowfall > 0;
+    const el = $('#weather');
+    el.innerHTML = `${t > 0 ? '+' : t < 0 ? '−' : ''}${Math.abs(t)}°${snowing ? SNOWFLAKE_SVG : ''}`;
+    el.title = `Екатеринбург: ${t > 0 ? '+' : ''}${t}°${snowing ? ', идёт снег' : ''}`;
+    el.hidden = false;
+  } catch (e) {
+    /* нет связи: просто не показываем погоду */
+  }
+}
+
 /* ---------- backup ---------- */
 function exportData() {
   const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
@@ -796,6 +816,8 @@ if ('serviceWorker' in navigator) {
 setMode('none');
 setAuthMode('in');
 setupSnow();
+loadWeather();
+setInterval(loadWeather, 15 * 60 * 1000);
 if (document.documentElement.dataset.theme) syncThemeColor();
 sb.auth.onAuthStateChange((event) => {
   if (event === 'SIGNED_OUT' && user) showAuth();
