@@ -7,6 +7,10 @@
 1. Supabase → **SQL Editor** → **New query**. Вставь всё содержимое `schema.sql` и нажми **Run**. Должно появиться «Success».
 2. **Authentication → Sign In / Providers → Email**: выключи **Confirm email** и нажми **Save**. Тогда друзья смогут зарегистрироваться без письма.
 3. В `config.js` указаны адрес проекта и publishable-ключ. Секретный ключ (`sb_secret_...`) туда класть нельзя.
+4. Для кнопки «Забыли пароль?»:
+   - **Authentication → URL Configuration**: Site URL и Redirect URLs = `https://colderrrrrr.github.io/calendar/`.
+   - **Authentication → Emails → SMTP Settings**: свой SMTP через Gmail (`smtp.gmail.com`, порт 465, пароль приложения Google). Встроенная почта Supabase шлёт письма только участникам проекта.
+   - **Authentication → Rate Limits**: 30 писем в час.
 
 ## 2. Выложить на GitHub Pages (бесплатно)
 
