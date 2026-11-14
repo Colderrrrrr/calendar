@@ -811,7 +811,7 @@ document.addEventListener('visibilitychange', async () => {
 
 /* ---------- start ---------- */
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW:', e)));
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(e => console.warn('SW:', e)));
 }
 setMode('none');
 setAuthMode('in');
