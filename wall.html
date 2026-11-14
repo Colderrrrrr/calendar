@@ -71,6 +71,13 @@ canvas { position: fixed; inset: 0; pointer-events: none; }
 .login .err { color: #f7c4c4; }
 [hidden] { display: none !important; }
 
+/* ?show=year — только год, крупно по центру (для второго монитора) */
+body.only-year .hero { left: 0; right: 0; bottom: auto; top: 50%; transform: translateY(-50%); text-align: center; }
+body.only-year .hero .big { font-size: 340px; margin-left: 0; }
+body.only-year .hero .sub { justify-content: center; font-size: 34px; }
+/* ?show=cal — только календарь, по центру монитора */
+body.only-cal .side { right: 0; left: 0; margin: 0 auto; }
+
 /* один узкий монитор или маленький экран — всё поменьше */
 @media (max-width: 1500px) {
   .hero { left: 90px; bottom: 130px; } .hero .big { font-size: 170px; }
@@ -207,11 +214,17 @@ async function refresh() {
   render();
 }
 
+// ?show=year — только год со снегом (вход не нужен), ?show=cal — только календарь, без параметра — всё вместе
+const SHOW = new URLSearchParams(location.search).get('show');
+document.body.classList.toggle('only-year', SHOW === 'year');
+document.body.classList.toggle('only-cal', SHOW === 'cal');
+
 async function start() {
   $('#login').hidden = true;
-  $('#hero').hidden = false;
-  $('#side').hidden = false;
+  $('#hero').hidden = SHOW === 'cal';
+  $('#side').hidden = SHOW === 'year';
   await loadWeather();
+  if (SHOW === 'year') { render(); setInterval(render, 60 * 1000); setInterval(loadWeather, 15 * 60 * 1000); return; }
   await refresh();
   setInterval(refresh, 60 * 1000);          // задачи — раз в минуту
   setInterval(loadWeather, 15 * 60 * 1000);  // погода — раз в 15 минут
@@ -227,7 +240,8 @@ $('#loginForm').onsubmit = async e => {
   if (data.session) start();
 };
 
-sb.auth.getSession().then(({ data }) => { if (data.session) start(); else $('#login').hidden = false; });
+if (SHOW === 'year') start();
+else sb.auth.getSession().then(({ data }) => { if (data.session) start(); else $('#login').hidden = false; });
 
 /* снег: два слоя — дальний размытый и ближний чёткий, немного и медленно */
 (function snow() {
