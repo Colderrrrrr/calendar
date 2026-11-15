@@ -5,15 +5,21 @@ const THEME = 'calendar-theme';
 const TZ_OFFSET_MIN = 5 * 60;           // Костанай, UTC+5
 const MIN_Y = 2026, MAX_Y = 2040;
 const EVENING_FROM = 22 * 60;           // 22:00
+const NIGHT_END = 4 * 60;               // до 4:00 ночи «Итог дня» относится ко вчерашнему дню
 
 const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 const MONTHS_GEN = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
 const WEEKDAYS = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
+const WD_SHORT = ['вс','пн','вт','ср','чт','пт','сб'];
+const WD_IN = ['в воскресенье','в понедельник','во вторник','в среду','в четверг','в пятницу','в субботу'];
+const WD_HOW = ['Как прошло воскресенье','Как прошёл понедельник','Как прошёл вторник','Как прошла среда','Как прошёл четверг','Как прошла пятница','Как прошла суббота'];
 
 const ICON = {
   check: '<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>',
   x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  left: '<svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>',
+  right: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
 };
 
 /* ---------- helpers ---------- */
@@ -36,6 +42,9 @@ function now() {
   return { key: dkey(y, m, d), y, m, d, min: t.getUTCHours() * 60 + t.getUTCMinutes() };
 }
 const isLastDay = n => n.d === daysIn(n.y, n.m);
+/* «день» для итога дня: ночью до 4:00 это ещё вчера (лёг спать в 00:30 — подводишь итог вчерашнего дня) */
+const evDay = () => { const n = now(); return n.min < NIGHT_END ? shift(n.key, -1) : n.key; };
+const dayLabel = k => { const p = parse(k); return `${WD_SHORT[weekday(k)]}, ${p.d} ${MONTHS_GEN[p.m]}`; };
 
 /* ---------- Supabase ---------- */
 const cfg = window.CALENDAR_CONFIG;
@@ -85,9 +94,20 @@ async function fetchAll(table, cols, order) {
   }
 }
 
+/* поле track («в прогресс») появилось позже: если в базе его ещё нет, сайт работает как раньше, без галочки */
+let hasTrack = true;
+const TASK_COLS = 'id,day,name,start_time,end_time,status,block_id,asked';
+async function fetchTasks() {
+  if (hasTrack) {
+    try { return await fetchAll('tasks', TASK_COLS + ',track', 'created_at'); }
+    catch (e) { if (!/track/i.test(e.message || '')) throw e; hasTrack = false; }
+  }
+  return fetchAll('tasks', TASK_COLS, 'created_at');
+}
+
 async function loadAll() {
   const [tasks, blocksRows, marks] = await Promise.all([
-    fetchAll('tasks', 'id,day,name,start_time,end_time,status,block_id,asked', 'created_at'),
+    fetchTasks(),
     fetchAll('blocks', 'id,month,name,note,position', 'position'),
     fetchAll('marks', 'kind,key', 'key'),
   ]);
@@ -95,7 +115,7 @@ async function loadAll() {
   for (const r of tasks) {
     (d.tasks[r.day] = d.tasks[r.day] || []).push({
       id: r.id, name: r.name, start: r.start_time || undefined, end: r.end_time || undefined,
-      status: r.status, block: r.block_id, asked: r.asked,
+      status: r.status, block: r.block_id, asked: r.asked, track: r.track || null,
     });
   }
   for (const r of blocksRows) (d.blocks[r.month] = d.blocks[r.month] || []).push({ id: r.id, name: r.name, note: r.note });
@@ -103,10 +123,10 @@ async function loadAll() {
   db = d;
 }
 
-const taskRow = (day, t) => ({
+const taskRow = (day, t) => Object.assign({
   id: t.id, day, name: t.name, start_time: t.start || null, end_time: t.end || null,
   status: t.status, block_id: t.block || null, asked: !!t.asked,
-});
+}, hasTrack ? { track: t.track || null } : {});
 const saveTask = (day, t) => remote(sb.from('tasks').insert(taskRow(day, t)));
 const patchTask = (id, fields) => remote(sb.from('tasks').update(fields).eq('id', id));
 const dropTask = id => remote(sb.from('tasks').delete().eq('id', id));
@@ -223,13 +243,16 @@ function renderDay() {
   if (bl.some(b => b.id === cur)) selEl.value = cur;
 
   const list = db.tasks[sel] || [];
+  const prevK = shift(sel, -1), nextK = shift(sel, 1);
   const timed = sortTasks(list.filter(t => t.start)), free = list.filter(t => !t.start);
   const row = x => {
     const bn = x.block ? findBlock(mk, x.block) : null;
     return `<li class="task s-${x.status}" data-id="${x.id}">` +
       (x.start ? `<span class="time">${x.start}–${x.end}</span>` : '') +
-      `<span class="name">${esc(x.name)}${bn ? `<small>${esc(bn)}</small>` : ''}</span>` +
+      `<span class="name">${esc(x.name)}${x.track ? ` <em class="tbadge">${esc(x.track)}</em>` : ''}${bn ? `<small>${esc(bn)}</small>` : ''}</span>` +
       `<span class="tools">` +
+      (inRange(prevK) ? `<button type="button" data-act="prev" class="mv" aria-label="Перенести на ${dayLabel(prevK)}" title="Перенести на ${dayLabel(prevK)}">${ICON.left}</button>` : '') +
+      (inRange(nextK) ? `<button type="button" data-act="next" class="mv" aria-label="Перенести на ${dayLabel(nextK)}" title="Перенести на ${dayLabel(nextK)}">${ICON.right}</button>` : '') +
       `<button type="button" data-act="done" class="${x.status === 'done' ? 'on' : ''}" aria-label="Получилось" title="Получилось">${ICON.check}</button>` +
       `<button type="button" data-act="fail" class="${x.status === 'fail' ? 'on' : ''}" aria-label="Не получилось" title="Не получилось">${ICON.x}</button>` +
       `<button type="button" data-act="del" aria-label="Удалить" title="Удалить">${ICON.trash}</button>` +
@@ -239,6 +262,45 @@ function renderDay() {
   if (timed.length) html += `<h3>По времени</h3><ul>${timed.map(row).join('')}</ul>`;
   if (free.length) html += `<h3>В любое время</h3><ul>${free.map(row).join('')}</ul>`;
   $('#taskList').innerHTML = html || '<p class="empty">На этот день пока пусто. Напиши первую задачу выше.</p>';
+
+  // перенести весь день: кнопка видна, только если есть что переносить
+  $('#moveDayBtn').hidden = !list.length;
+  $('#movePop').hidden = true;
+  $('#moveDayBtn').setAttribute('aria-expanded', 'false');
+  $('#moveText').textContent = `Перенести ${list.length === 1 ? 'задачу' : `все ${list.length} ${plural(list.length, 'задачу', 'задачи', 'задач')}`}`;
+  $('#movePrev').textContent = `← На ${dayLabel(prevK)}`;
+  $('#moveNext').textContent = `На ${dayLabel(nextK)} →`;
+  $('#movePrev').hidden = !inRange(prevK);
+  $('#moveNext').hidden = !inRange(nextK);
+  renderTrackPicker();
+  updateButtons();
+}
+const plural = (n, a, b, c) => { const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? b : c; };
+
+/* ---------- галочка «В прогресс» ---------- */
+let trackOn = false, selTrack = null, newTrack = false;
+function allTracks() {
+  const set = new Set();
+  for (const k in db.tasks) for (const t of db.tasks[k]) if (t.track) set.add(t.track);
+  return [...set].sort((a, b) => a.localeCompare(b, 'ru'));
+}
+function renderTrackPicker() {
+  $('#trackChk').hidden = !hasTrack;
+  $('#trackOn').checked = trackOn;
+  const box = $('#trackRow'), list = allTracks();
+  box.hidden = !hasTrack || !trackOn;
+  if (box.hidden) return;
+  if (!list.length) newTrack = true;                       // первый раз — сразу поле для названия
+  if (selTrack && !list.includes(selTrack)) selTrack = null;
+  if (!selTrack && !newTrack) selTrack = list[0];
+  box.querySelector('.chips-row').innerHTML =
+    list.map(n => `<button type="button" class="tchip${!newTrack && n === selTrack ? ' on' : ''}" data-track="${esc(n)}">${esc(n)}</button>`).join('') +
+    `<button type="button" class="tchip new${newTrack ? ' on' : ''}" data-track="">+ Новый</button>`;
+  $('#trackNew').hidden = !newTrack;
+}
+function chosenTrack() {
+  if (!hasTrack || !trackOn) return null;
+  return newTrack ? $('#trackNew').value.trim().slice(0, 60) : selTrack;
 }
 
 function renderAll() { renderMonth(); renderDay(); updateButtons(); }
@@ -278,7 +340,10 @@ async function addTask(ev) {
   const name = $('#taskName').value.trim();
   if (!name) { showError('Напиши, что сделать'); $('#taskName').focus(); return; }
   const day = sel, mk = mkey(parse(day).y, parse(day).m);
-  const task = { id: newId(), name, status: 'plan', block: $('#blockSel').value || null, asked: false };
+  const track = chosenTrack();
+  if (hasTrack && trackOn && !track) { showError('Напиши название прогресса, например «Практика»'); $('#trackNew').focus(); return; }
+  const task = { id: newId(), name, status: 'plan', block: $('#blockSel').value || null, asked: false, track };
+  if (track) { selTrack = track; newTrack = false; $('#trackNew').value = ''; }
   if (mode === 'time') {
     const s = $('#startTime').value, e = $('#endTime').value;
     if (!s || !e) { showError('Укажи время начала и конца'); return; }
@@ -316,13 +381,50 @@ function deleteTask(k, id) {
   } }], 6000);
 }
 
+/* ---------- перенос задач на соседний день ---------- */
+/* blocks привязаны к месяцу: если задача уехала в другой месяц, блок с неё снимаем */
+function moveTasks(from, ids, to, blocksBack = {}) {
+  if (!inRange(to) || !ids.length) return [];
+  const sameMonth = from.slice(0, 7) === to.slice(0, 7);
+  const src = db.tasks[from] || [], moved = [];
+  for (const id of ids) {
+    const i = src.findIndex(t => t.id === id);
+    if (i < 0) continue;
+    const [t] = src.splice(i, 1);
+    const fields = { day: to };
+    if (blocksBack[id]) { t.block = blocksBack[id]; fields.block_id = t.block; }
+    else if (!sameMonth && t.block) { t.block = null; fields.block_id = null; }
+    (db.tasks[to] = db.tasks[to] || []).push(t);
+    moved.push(t);
+    patchTask(id, fields);
+  }
+  if (!src.length) delete db.tasks[from];
+  return moved;
+}
+function moveWithUndo(from, ids, delta) {
+  const to = shift(from, delta);
+  const oldBlocks = {};
+  for (const t of db.tasks[from] || []) if (ids.includes(t.id) && t.block) oldBlocks[t.id] = t.block;
+  const moved = moveTasks(from, ids, to);
+  if (!moved.length) return;
+  renderMonth(); renderDay();
+  const what = moved.length === 1 ? `«${moved[0].name}»` : `${moved.length} ${plural(moved.length, 'задачу', 'задачи', 'задач')}`;
+  toast(`Перенёс ${what} на ${dayLabel(to)}`, [{ label: 'Отменить', run: () => {
+    moveTasks(to, moved.map(t => t.id), from, oldBlocks);
+    renderMonth(); renderDay();
+  } }], 7000);
+}
+
 /* ---------- evening check ---------- */
 function openEvening() {
   renderEvening();
   $('#eveningDlg').showModal();
 }
 function renderEvening() {
-  const k = now().key, list = sortTasks(db.tasks[k] || []);
+  const k = evDay(), list = sortTasks(db.tasks[k] || []);
+  const tk = shift(k, 1), tp = parse(tk);
+  $('#eveningTitle').textContent = `${WD_HOW[weekday(k)]}, ${parse(k).d} ${MONTHS_GEN[parse(k).m]}?`;
+  $('#tomorrowLabel').textContent = `Что хочешь сделать ${WD_IN[weekday(tk)]}, ${tp.d} ${MONTHS_GEN[tp.m]}?`;
   $('#eveningList').innerHTML = list.length
     ? list.map(x => `<div class="check-row" data-id="${x.id}"><span>${x.start ? `<span class="t">${x.start}–${x.end}</span>` : ''}${esc(x.name)}</span>` +
         `<span class="yn"><button type="button" data-s="done" class="${x.status === 'done' ? 'on-done' : ''}">Да</button>` +
@@ -371,6 +473,114 @@ function renderBlocks() {
     : 'Названия блоков видны в списке при добавлении задачи.';
 }
 
+/* ---------- прогресс ----------
+   Считает только задачи с галочкой «В прогресс» выбранного направления.
+   Месяц: первый — с дня старта плана, остальные — целиком. День «сделан», если все его задачи зелёные. */
+const MONTHS_SHORT = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+const nextMonth = mk => { const [y, m] = mk.split('-').map(Number); return m === 12 ? `${y + 1}-01` : `${y}-${pad(m + 1)}`; };
+let progTrack = null, progMonth = null;
+function trackDays(track) {
+  const out = {};
+  for (const k in db.tasks) { const l = db.tasks[k].filter(t => t.track === track); if (l.length) out[k] = l; }
+  return out;
+}
+const dayStatus = l => !l || !l.length ? 'empty' : l.some(t => t.status === 'fail') ? 'fail' : l.every(t => t.status === 'done') ? 'done' : 'plan';
+const daysBetween = (a, b) => Math.round((Date.UTC(...ymd(b)) - Date.UTC(...ymd(a))) / 86400000);
+const ymd = k => { const p = parse(k); return [p.y, p.m, p.d]; };
+
+function openProgress() {
+  const list = allTracks();
+  if (!list.length) return;
+  if (!list.includes(progTrack)) progTrack = list[0];
+  progMonth = null;
+  renderProgress();
+  $('#progressDlg').showModal();
+}
+function renderProgress() {
+  const tracks = allTracks();
+  if (!tracks.includes(progTrack)) progTrack = tracks[0];
+  $('#trackSel').innerHTML = tracks.map(n => `<option${n === progTrack ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  $('#trackSel').hidden = tracks.length < 2;
+  $('#progTitle').textContent = tracks.length < 2 && progTrack ? progTrack : 'Прогресс';
+  const days = trackDays(progTrack), keys = Object.keys(days).sort();
+  if (!keys.length) { $('#progMonths').innerHTML = ''; $('#progBody').innerHTML = '<p class="empty">Здесь пока пусто. Поставь галочку «В прогресс», когда добавляешь задачу.</p>'; return; }
+  const today = now().key, first = keys[0], last = keys[keys.length - 1];
+
+  // месяцы плана
+  const months = [];
+  for (let mk = first.slice(0, 7); mk <= last.slice(0, 7); mk = nextMonth(mk)) months.push(mk);
+  if (!months.includes(progMonth)) progMonth = months.includes(today.slice(0, 7)) ? today.slice(0, 7) : (today < first ? months[0] : months[months.length - 1]);
+  const [py, pm] = progMonth.split('-').map(Number);
+  const start = progMonth === first.slice(0, 7) ? first : `${progMonth}-01`;
+  const end = `${progMonth}-${pad(daysIn(py, pm - 1))}`;
+  $('#progMonths').innerHTML = months.map(mk => {
+    const [y, m] = mk.split('-').map(Number), s = mk === first.slice(0, 7) ? parse(first).d : 1;
+    return `<button type="button" data-mk="${mk}" class="${mk === progMonth ? 'on' : ''}">${MONTHS[m - 1]}${y !== parse(today).y ? ' ' + y : ''} <small>${s}–${daysIn(y, m - 1)}</small></button>`;
+  }).join('');
+  $('#progMonths').hidden = months.length < 2;
+
+  // дни месяца и их статусы
+  const range = [];
+  for (let k = start; k <= end; k = shift(k, 1)) range.push(k);
+  const st = k => dayStatus(days[k]);
+  const N = range.length;
+  const done = range.filter(k => st(k) === 'done').length, fail = range.filter(k => st(k) === 'fail').length;
+  const left = range.filter(k => k > today).length;
+  const pct = Math.round(done / N * 100);
+  const sub = end < today ? `${pct}% · месяц закончился` : start > today ? `${pct}% · месяц ещё не начался` : `${pct}% месяца · осталось ${left} ${plural(left, 'день', 'дня', 'дней')}`;
+
+  // огонёк: сколько дней с заданиями подряд всё сделано (сегодня ещё можно успеть, поэтому не сбивает)
+  let streak = 0;
+  for (const k of keys.filter(k => k <= today).reverse()) {
+    if (k === today && st(k) !== 'done') continue;
+    if (st(k) === 'done') streak++; else break;
+  }
+
+  // темп и прогноз по всему плану
+  const all = keys.flatMap(k => days[k].map(t => ({ k, t })));
+  const behind = all.filter(x => x.k < today && x.t.status === 'plan').length;
+  const leftTasks = all.filter(x => x.t.status === 'plan').length;
+  const doneTasks = all.filter(x => x.t.status === 'done').length;
+  let forecast;
+  if (!leftTasks) forecast = 'Всё сделано';
+  else if (today < first) forecast = `Старт ${parse(first).d} ${MONTHS_GEN[parse(first).m]}`;
+  else if (!doneTasks) forecast = 'Отметь первое задание';
+  else {
+    const pace = doneTasks / (daysBetween(first, today) + 1);
+    const f = parse(shift(today, Math.ceil(leftTasks / pace)));
+    forecast = `Закончишь ${f.d} ${MONTHS_GEN[f.m]}`;
+  }
+
+  // недели плана: по 7 дней от дня старта (как в самом плане: 15–21, 22–28…)
+  const weeks = [], weekNo = [];
+  for (const k of range) {
+    const w = Math.floor(daysBetween(first, k) / 7);
+    if (weekNo[weekNo.length - 1] !== w) { weeks.push([]); weekNo.push(w); }
+    weeks[weeks.length - 1].push(k);
+  }
+  const wLabel = w => { const a = parse(w[0]), b = parse(w[w.length - 1]); return `${a.d}${a.d === b.d ? '' : '–' + b.d} ${MONTHS_SHORT[b.m]}`; };
+  const openW = weeks.findIndex(w => w[0] <= today && today <= w[w.length - 1]);
+
+  const rowsOf = w => w.filter(k => days[k]).map(k => days[k].map((t, i) =>
+    `<button type="button" class="prow${k === today ? ' today' : ''}${t.status === 'done' ? ' done' : ''}${k < today && t.status === 'plan' ? ' late' : ''}" data-k="${k}">` +
+    `<span class="pd">${i ? '' : `<b>${parse(k).d}</b>${WD_SHORT[weekday(k)]}`}</span>` +
+    `<span class="pn">${esc(t.name)}${k === today && !i ? '<em>сегодня</em>' : ''}${k < today && t.status === 'plan' ? '<em class="late-tag">не отмечено</em>' : ''}</span>` +
+    `<i class="dot s-${t.status}"></i></button>`).join('')).join('');
+
+  $('#progBody').innerHTML =
+    `<div class="p-hero"><div><div class="p-big">${done}<span>из ${N} ${plural(N, 'дня', 'дней', 'дней')}</span></div><div class="muted small">${sub}</div></div>` +
+    `<div class="p-fire${streak ? '' : ' off'}" title="Дней подряд всё сделано"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="f1" d="M12 2c1 4 5 5.5 5 11a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5 .2 1.8 1 3 2.5 3.5C11 9 10.5 5.5 12 2z"/><path class="f2" d="M12 22a3 3 0 0 1-3-3c0-1.8 1.3-2.8 3-4.5 1.7 1.7 3 2.7 3 4.5a3 3 0 0 1-3 3z"/></svg>` +
+    `<div><b>${streak}</b><em>${plural(streak, 'день', 'дня', 'дней')} подряд</em></div></div></div>` +
+    `<div class="p-bar"><i class="s-done-bar" style="width:${done / N * 100}%"></i><i class="s-fail-bar" style="width:${fail / N * 100}%"></i></div>` +
+    `<div class="legend"><span><i class="dot s-done"></i>сделал ${done}</span><span><i class="dot s-fail"></i>не получилось ${fail}</span><span><i class="dot p-rest"></i>остальное ${N - done - fail}</span></div>` +
+    `<div class="p-cards"><div class="p-card ${behind ? 'warn' : 'ok'}"><span>Темп</span><b>${behind ? `Отстаёшь на ${behind} ${plural(behind, 'задачу', 'задачи', 'задач')}` : 'Всё по плану'}</b></div>` +
+    `<div class="p-card"><span>Прогноз</span><b>${forecast}</b></div></div>` +
+    `<div class="p-weeks">${weeks.map(w => `<div class="p-wk"><span>${wLabel(w)}</span><span class="p-mini">${w.map(k => `<i class="m-${st(k)}${k === today ? ' m-today' : ''}"></i>`).join('')}</span><b>${w.filter(k => st(k) === 'done').length}/${w.length}</b></div>`).join('')}</div>` +
+    weeks.map((w, i) => w.some(k => days[k])
+      ? `<details class="p-week"${i === openW || (openW < 0 && i === 0) ? ' open' : ''}><summary><span>Неделя ${weekNo[i] + 1} · ${wLabel(w)}</span><small>${w.filter(k => st(k) === 'done').length} из ${w.length}</small></summary><div class="p-list">${rowsOf(w)}</div></details>`
+      : '').join('');
+}
+
 /* ---------- toasts ---------- */
 function toast(text, actions = [], ms = 5000) {
   const el = document.createElement('div');
@@ -404,8 +614,12 @@ function checkEnded() {
 }
 
 /* ---------- auto-open windows ---------- */
-function anyDialogOpen() { return $('#eveningDlg').open || $('#blocksDlg').open; }
-function updateButtons() { $('#summaryBtn').hidden = !isLastDay(now()); }
+function anyDialogOpen() { return $('#eveningDlg').open || $('#blocksDlg').open || $('#progressDlg').open; }
+function updateButtons() {
+  $('#summaryBtn').hidden = !isLastDay(now());
+  // «Прогресс» видят только те, у кого есть задачи с галочкой
+  $('#progressBtn').hidden = !hasTrack || !allTracks().length;
+}
 function checkAuto() {
   if (!user || anyDialogOpen()) return;
   const n = now();
@@ -722,27 +936,56 @@ $('#taskList').onclick = e => {
   const b = e.target.closest('button[data-act]'); if (!b) return;
   const id = b.closest('.task').dataset.id, act = b.dataset.act;
   if (act === 'del') return deleteTask(sel, id);
+  if (act === 'prev' || act === 'next') return moveWithUndo(sel, [id], act === 'prev' ? -1 : 1);
   setStatus(sel, id, act);
   renderMonth(); renderDay();
 };
 
+$('#moveDayBtn').onclick = () => {
+  const open = $('#movePop').hidden;
+  $('#movePop').hidden = !open;
+  $('#moveDayBtn').setAttribute('aria-expanded', open);
+};
+$('#movePrev').onclick = () => moveWithUndo(sel, (db.tasks[sel] || []).map(t => t.id), -1);
+$('#moveNext').onclick = () => moveWithUndo(sel, (db.tasks[sel] || []).map(t => t.id), 1);
+
+$('#trackOn').onchange = e => { trackOn = e.target.checked; hideError(); renderTrackPicker(); if (trackOn && newTrack) $('#trackNew').focus(); };
+$('#trackRow').onclick = e => {
+  const b = e.target.closest('.tchip'); if (!b) return;
+  if (b.dataset.track) { selTrack = b.dataset.track; newTrack = false; }
+  else newTrack = true;
+  hideError();
+  renderTrackPicker();
+  if (newTrack) $('#trackNew').focus();
+};
+$('#trackNew').oninput = hideError;
+
+$('#progressBtn').onclick = openProgress;
+$('#trackSel').onchange = e => { progTrack = e.target.value; progMonth = null; renderProgress(); };
+$('#progMonths').onclick = e => { const b = e.target.closest('button[data-mk]'); if (!b) return; progMonth = b.dataset.mk; renderProgress(); };
+$('#progBody').onclick = e => {
+  const r = e.target.closest('.prow'); if (!r) return;
+  $('#progressDlg').close();
+  selectDay(r.dataset.k);
+};
+
 $('#eveningList').onclick = e => {
   const b = e.target.closest('button[data-s]'); if (!b) return;
-  setStatus(now().key, b.closest('.check-row').dataset.id, b.dataset.s, false);
+  setStatus(evDay(), b.closest('.check-row').dataset.id, b.dataset.s, false);
   renderEvening(); renderMonth(); renderDay();
 };
 $('#tomorrowForm').onsubmit = e => {
   e.preventDefault();
   const name = $('#tomorrowName').value.trim();
   if (!name) { $('#tomorrowName').focus(); return; }
-  const k = shift(now().key, 1), task = { id: newId(), name, status: 'plan', block: null, asked: false };
+  const k = shift(evDay(), 1), task = { id: newId(), name, status: 'plan', block: null, asked: false, track: null };
   (db.tasks[k] = db.tasks[k] || []).push(task);
   saveTask(k, task);
   $('#tomorrowName').value = '';
   renderEvening(); renderMonth(); renderDay();
 };
 $('#saveDay').onclick = () => {
-  const k = now().key;
+  const k = evDay();
   db.eveningDone[k] = true;
   saveMark('evening', k);
   $('#eveningDlg').close();

@@ -1,9 +1,9 @@
 // Service worker: файлы сайта всегда сверяем с сервером (чтобы обновления приходили сразу),
 // а без интернета показываем сохранённую копию. Запросы к Supabase и погоде не трогаем.
 // При каждом обновлении сайта: поднять номер версии здесь и ?v= в index.html.
-const CACHE = 'calendar-shell-v5';
+const CACHE = 'calendar-shell-v6';
 const SHELL = [
-  './', 'index.html', 'style.css?v=5', 'app.js?v=5', 'config.js?v=5', 'manifest.webmanifest',
+  './', 'index.html', 'style.css?v=6', 'app.js?v=6', 'config.js?v=6', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 

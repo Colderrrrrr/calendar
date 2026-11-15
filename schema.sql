@@ -51,3 +51,6 @@ create policy "own tasks" on public.tasks for all to authenticated
 drop policy if exists "own marks" on public.marks;
 create policy "own marks" on public.marks for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+
+-- Галочка «В прогресс» (добавлено позже): название направления, например «Практика».
+alter table public.tasks add column if not exists track text check (char_length(track) between 1 and 60);

@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 <script>try{var t=localStorage.getItem('calendar-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 </head>
 <body>
@@ -47,6 +47,7 @@
     </div>
     <div class="actions">
       <span id="weather" class="weather" title="Погода в Екатеринбурге" hidden></span>
+      <button id="progressBtn" hidden><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Прогресс</span></button>
       <button id="eveningBtn"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg><span>Итог дня</span></button>
       <button id="summaryBtn" hidden><svg viewBox="0 0 24 24"><path d="M5 21V4m0 0h11l-2 4 2 4H5"/></svg><span>Итоги месяца</span></button>
       <button id="snowBtn" class="icon" aria-label="Снег" aria-pressed="true" title="Снег" hidden><svg viewBox="0 0 24 24"><path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9M9.8 6.2L12 4.2l2.2 2M9.8 17.8l2.2 2 2.2-2M8.1 7.2L5.2 8.1l.7 2.9M18.1 11l.7-2.9-2.9-.9M8.1 16.8l-2.9-.9.7-2.9M15.9 16.8l2.9-.9-.7-2.9"/></svg></button>
@@ -58,8 +59,15 @@
   <main class="main">
     <aside class="day">
       <div class="day-head">
-        <h2 id="dayTitle"></h2>
-        <p id="daySub" class="muted"></p>
+        <div>
+          <h2 id="dayTitle"></h2>
+          <p id="daySub" class="muted"></p>
+        </div>
+        <button type="button" id="moveDayBtn" class="ghost small move-btn" aria-expanded="false" aria-controls="movePop" hidden><svg viewBox="0 0 24 24"><path d="M7 7h13l-4-4M17 17H4l4 4"/></svg>Перенести день</button>
+      </div>
+      <div id="movePop" class="move-pop" hidden>
+        <p id="moveText" class="muted small"></p>
+        <div><button type="button" id="movePrev"></button><button type="button" id="moveNext"></button></div>
       </div>
 
       <form id="addForm" class="add" novalidate>
@@ -72,6 +80,11 @@
           <label>с <input id="startTime" type="time" value="18:00"></label>
           <label>до <input id="endTime" type="time" value="19:00"></label>
           <p id="duration" class="muted small"></p>
+        </div>
+        <label id="trackChk" class="chk" hidden><input type="checkbox" id="trackOn">В прогресс</label>
+        <div id="trackRow" class="track-row" hidden>
+          <div class="chips-row"></div>
+          <input id="trackNew" type="text" maxlength="60" placeholder="Название, например «Практика»" autocomplete="off" aria-label="Название прогресса">
         </div>
         <div class="block-row">
           <select id="blockSel" aria-label="Блок месяца"></select>
@@ -104,11 +117,11 @@
 
 <dialog id="eveningDlg" class="dlg">
   <div class="dlg-head">
-    <h2>Как прошёл день?</h2>
+    <h2 id="eveningTitle">Как прошёл день?</h2>
     <button type="button" class="icon close" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </div>
   <div id="eveningList"></div>
-  <p class="label">Что хочешь сделать завтра?</p>
+  <p class="label" id="tomorrowLabel">Что хочешь сделать завтра?</p>
   <form id="tomorrowForm" class="inline-form" novalidate>
     <input id="tomorrowName" type="text" placeholder="Дописать отчёт" autocomplete="off" aria-label="Задача на завтра">
     <button type="submit">Добавить</button>
@@ -128,10 +141,20 @@
   <button type="button" id="blocksDone" class="primary wide">Готово</button>
 </dialog>
 
+<dialog id="progressDlg" class="dlg dlg-wide">
+  <div class="dlg-head">
+    <h2 id="progTitle">Прогресс</h2>
+    <select id="trackSel" class="track-sel" aria-label="Направление"></select>
+    <button type="button" class="icon close" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div id="progMonths" class="seg p-months"></div>
+  <div id="progBody"></div>
+</dialog>
+
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="config.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>
